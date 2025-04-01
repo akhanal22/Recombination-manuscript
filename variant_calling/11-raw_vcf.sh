@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH -J dadi_vcf_pur
+#SBATCH -J raw_vcf
 #SBATCH -N 1
 #SBATCH --ntasks-per-node=50
 #SBATCH -o %x.%j.out
@@ -9,7 +9,7 @@
 
 gatk --java-options "-Xmx5g -Xms5g" GenotypeGVCFs \
     -R Salix_purpurea_var_94006.mainGenome-noZ.fasta \
-    -O vcf/all_including_m7f5.genotypes.raw.vcf \
+    -O vcf/genotypes.raw.vcf \
     -G StandardAnnotation \
     --use-new-qual-calculator \
     -V gendb://genodb \
