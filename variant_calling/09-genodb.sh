@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH -J dadi_genodb
+#SBATCH -J genodb
 #SBATCH -N 1
 #SBATCH --ntasks-per-node=50
 #SBATCH -o %x.%j.out
