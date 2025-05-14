@@ -14,7 +14,6 @@ prefix=`sed -n "$prefixNumP" names.list`
 
 gatk HaplotypeCaller \
     -R Salix_purpurea_var_94006.mainGenome-noZ.fasta \
-    -L "$prefix" \
     -I dBAM/"$prefix".dedup.bam \
     -ERC GVCF \
     --heterozygosity 0.015 \
