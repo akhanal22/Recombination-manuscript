@@ -1,0 +1,164 @@
+# Read mapping for sex-determining region analysis
+
+This directory contains five SLURM batch scripts for processing paired-end Illumina sequencing reads for downstream analysis of the sex-determining region (SDR). The workflow converts FASTQ files to unmapped BAM files, aligns reads to a reference genome, restores read metadata, sorts alignments, and marks duplicate reads.
+
+The scripts use the reference `Salix_purpurea_var_94006.mainGenome-noZ.fasta` and assign the read-group identifier `Salix_nivalis_SLR`. They produce genome-wide alignment files; they do **not** identify SDR boundaries, call variants, calculate recombination rates, or perform association mapping.
+
+## Workflow and files
+
+Run the scripts in numerical order for each sample:
+
+| Step | Script | Main operation | Main output |
+| --- | --- | --- | --- |
+| 1 | `01-ubam_all.sh` | Convert paired FASTQ files to an unmapped BAM with sample and read-group metadata | `uBAM/<sample>.unmapped.bam` |
+| 2 | `02-alignedbam.sh` | Convert the unmapped BAM to an interleaved FASTQ stream and align with BWA-MEM | `aBAM/<sample>.aligned.bam` |
+| 3 | `03-merge_abam_ubam.sh` | Merge alignments with the original unmapped BAM metadata | `mBAM/<sample>.merged.bam` |
+| 4 | `04-sortedbam.sh` | Sort by genomic coordinate and calculate reference-dependent tags | `sBAM/<sample>.sorted.bam` |
+| 5 | `05-removeduplicatedreads_bam.sh` | Mark duplicate reads and write duplication metrics | `dBAM/<sample>.dedup.bam` |
+
+**Despite its filename, step 5 marks duplicates rather than removing them.** The script does not set `REMOVE_DUPLICATES=true`. Duplicate reads remain in the output BAM and are flagged for downstream tools to recognize or exclude.
+
+## Requirements
+
+- A Linux environment with Bash and a SLURM scheduler.
+- GATK with the Picard tools used by these scripts: `FastqToSam`, `SamToFastq`, `MergeBamAlignment`, `SortSam`, `SetNmMdAndUqTags`, and `MarkDuplicates`.
+- Java compatible with the installed GATK release.
+- BWA with the `mem` command.
+- SAMtools.
+- Paired-end FASTQ files, a sample list, and an indexed reference genome.
+
+The commands `gatk`, `bwa`, and `samtools` must be available on `PATH` in the compute jobs. Load your cluster's modules or activate the appropriate environment before submission, or add the setup commands to each script. Exact software versions are not pinned in this directory. Step 3 records `0.7.17-r1188` as the BWA program version in the BAM header; this is a fixed metadata value and does not verify the installed version.
+
+## Prepare the inputs
+
+### 1. Working directory and sample list
+
+Submit the jobs from a working directory containing the scripts, reference, FASTQ files, and `names.txt`. All paths in the scripts are relative to the job's working directory.
+
+Create `names.txt` with one sample prefix per line, without a header, blank lines, or FASTQ suffixes. For example:
+
+```text
+sample01
+sample02
+sample03
+```
+
+Each prefix must match a pair of files named:
+
+```text
+<sample>_R1.fastq.gz
+<sample>_R2.fastq.gz
+```
+
+Each SLURM array task reads the corresponding line of `names.txt`. Task 1 processes the first sample, task 2 processes the second, and so on. Ensure that prefixes are unique so that output files are not overwritten.
+
+### 2. Output directories
+
+The scripts do not create their output directories. Create them before running:
+
+```bash
+mkdir -p uBAM aBAM mBAM sBAM dBAM
+```
+
+### 3. Reference genome
+
+Place the reference FASTA in the working directory. Prepare the BWA index, FASTA index, and sequence dictionary once:
+
+```bash
+bwa index Salix_purpurea_var_94006.mainGenome-noZ.fasta
+
+samtools faidx Salix_purpurea_var_94006.mainGenome-noZ.fasta
+
+gatk CreateSequenceDictionary \
+    -R Salix_purpurea_var_94006.mainGenome-noZ.fasta \
+    -O Salix_purpurea_var_94006.mainGenome-noZ.dict
+```
+
+If using another reference, update its path in steps 2, 3, and 4, including the recorded command-line metadata in step 3. Use the same reference for alignment, merging, and tag calculation.
+
+## What each step does
+
+### Step 1: Create an unmapped BAM
+
+`01-ubam_all.sh` runs `gatk FastqToSam` on the paired FASTQ files. The unmapped BAM preserves the original reads and attaches metadata that can be carried through alignment.
+
+| Metadata field | Value in the script |
+| --- | --- |
+| Read-group name | `Salix_nivalis_SLR` |
+| Sample name | Sample prefix from `names.txt` |
+| Library name | `NEBNext-<sample>` |
+| Platform unit | `HT23LBBXX.6.1101` |
+| Platform | `illumina` |
+| Sequencing center | `OMRF` |
+| Run date | `2018-03-12T08:55:00+0500` |
+
+These values describe the original dataset. Update them to match any new sequencing dataset, especially when combining multiple libraries or sequencing runs.
+
+### Step 2: Align reads
+
+`02-alignedbam.sh` streams reads from `gatk SamToFastq` into `bwa mem`, then converts the SAM output to BAM with `samtools view`. No intermediate FASTQ or SAM file is written to disk.
+
+The BWA command uses 16 threads (`-t 16`), interleaved paired-end input (`-p`), a fixed input batch size (`-K 100000000`), and soft clipping for supplementary alignments (`-Y`). The resulting alignment BAM is an intermediate file for step 3.
+
+### Step 3: Merge alignments and original metadata
+
+`03-merge_abam_ubam.sh` runs `gatk MergeBamAlignment` using the aligned BAM and the original unmapped BAM. This combines alignment information with the original read and read-group metadata.
+
+The script specifies FR pair orientation, retains unmapped reads, adds mate CIGAR information, disables adapter clipping during this step, and enables contaminant-read handling through `UNMAP_CONTAMINANT_READS=true`. Its output sort order is explicitly `unsorted`; coordinate sorting occurs in step 4.
+
+### Step 4: Sort and calculate alignment tags
+
+`04-sortedbam.sh` pipes `gatk SortSam` into `gatk SetNmMdAndUqTags`. It sorts alignments by reference coordinate and calculates the `NM`, `MD`, and `UQ` tags using the reference sequence.
+
+The output is `sBAM/<sample>.sorted.bam`, together with a BAM index and an MD5 checksum file. These tags describe edit distance, reference mismatches/deletions, and a base-quality-based alignment measure, respectively.
+
+### Step 5: Mark duplicate reads
+
+`05-removeduplicatedreads_bam.sh` runs `gatk MarkDuplicates` on the coordinate-sorted BAM. It writes:
+
+- `dBAM/<sample>.dedup.bam`: the final BAM with duplicate flags.
+- `dBAM/<sample>.dedup.metrics`: duplicate metrics.
+- A BAM index and an MD5 checksum file.
+
+The optical duplicate pixel distance is set to `2500`. Review this setting for the sequencing instrument used. The `.dedup.bam` suffix is an output naming convention; it does not mean duplicate records have been physically removed.
+
+## Run on SLURM
+
+The supplied scripts define arrays of **132 tasks** (`#SBATCH -a 1-132:1`) and request one node with 16 tasks per node. Step 1 uses partition `nocona`; steps 2–5 use `quanah`. Change these settings for your cluster and sample count.
+
+The following example overrides the array size using `names.txt` and submits the stages with dependencies. It assumes the software environment, partitions, directories, and inputs have already been prepared:
+
+```bash
+n_samples=$(awk 'END {print NR}' names.txt)
+
+j1=$(sbatch --parsable --array="1-${n_samples}" 01-ubam_all.sh)
+j2=$(sbatch --parsable --array="1-${n_samples}" --dependency="afterok:${j1}" 02-alignedbam.sh)
+j3=$(sbatch --parsable --array="1-${n_samples}" --dependency="afterok:${j2}" 03-merge_abam_ubam.sh)
+j4=$(sbatch --parsable --array="1-${n_samples}" --dependency="afterok:${j3}" 04-sortedbam.sh)
+j5=$(sbatch --parsable --array="1-${n_samples}" --dependency="afterok:${j4}" 05-removeduplicatedreads_bam.sh)
+
+printf 'Submitted final job array: %s\n' "$j5"
+```
+
+Each stage waits until the entire preceding array finishes successfully. Standard output and error logs use `%x.%j.out` and `%x.%j.err`, where `%x` is the job name and `%j` is the job ID.
+
+### Settings to review before submission
+
+- **Resources:** The scripts do not specify memory or wall-time limits. Request appropriate limits for your dataset and cluster. Java `-Xms` specifies initial heap allocation, not a maximum; step 1 specifies a maximum heap of 8 GB through `-Xmx8G`.
+- **CPU allocation:** BWA uses 16 threads. Many clusters prefer `--ntasks=1 --cpus-per-task=16` for a multithreaded command; adapt the SLURM directives to local policy.
+- **Failure handling:** The supplied scripts do not enable `set -euo pipefail`. Consider adding it after the `#SBATCH` directives, particularly for the pipelines in steps 2 and 4, so upstream command failures are reported to SLURM.
+- **Metadata:** Check the sample, library, platform-unit, run-date, and recorded aligner-version values before reusing the scripts.
+
+## Check the outputs
+
+After the final stage, check the BAM structure and summarize alignment flags for a sample:
+
+```bash
+samtools quickcheck -v dBAM/sample01.dedup.bam
+samtools flagstat dBAM/sample01.dedup.bam > dBAM/sample01.flagstat.txt
+samtools idxstats dBAM/sample01.dedup.bam > dBAM/sample01.idxstats.txt
+```
+
+Replace `sample01` with a prefix from `names.txt`. Review the SLURM error logs and duplication metrics as well. `quickcheck` checks basic file integrity; it does not establish mapping accuracy or biological suitability.
+
+The final BAMs are starting points for downstream analyses. This directory does not implement mapping-quality filtering, explicit duplicate removal, variant calling, or SDR-specific analysis. Apply the filters required by the downstream method and record software versions and reference provenance when reproducing the analysis.
