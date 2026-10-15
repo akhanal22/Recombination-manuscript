@@ -2,7 +2,7 @@
 
 This directory contains five SLURM batch scripts for processing paired-end Illumina sequencing reads for downstream analysis of the sex-determining region (SDR). The workflow converts FASTQ files to unmapped BAM files, aligns reads to a reference genome, restores read metadata, sorts alignments, and marks duplicate reads.
 
-The scripts use the reference `Salix_purpurea_var_94006.mainGenome-noZ.fasta` and assign the read-group identifier `Salix_nivalis_SLR`. They produce genome-wide alignment files; they do **not** identify SDR boundaries, call variants, calculate recombination rates, or perform association mapping.
+The scripts use the reference `Salix_purpurea_var_94006.mainGenome-noZ.fasta` and assign the read-group identifier `Salix_nivalis_SLR`. They produce genome-wide alignment files.
 
 ## Workflow and files
 
@@ -14,9 +14,9 @@ Run the scripts in numerical order for each sample:
 | 2 | `02-alignedbam.sh` | Convert the unmapped BAM to an interleaved FASTQ stream and align with BWA-MEM | `aBAM/<sample>.aligned.bam` |
 | 3 | `03-merge_abam_ubam.sh` | Merge alignments with the original unmapped BAM metadata | `mBAM/<sample>.merged.bam` |
 | 4 | `04-sortedbam.sh` | Sort by genomic coordinate and calculate reference-dependent tags | `sBAM/<sample>.sorted.bam` |
-| 5 | `05-removeduplicatedreads_bam.sh` | Mark duplicate reads and write duplication metrics | `dBAM/<sample>.dedup.bam` |
+| 5 | `05-markduplicatedreads_bam.sh` | Mark duplicate reads and write duplication metrics | `dBAM/<sample>.dedup.bam` |
 
-**Despite its filename, step 5 marks duplicates rather than removing them.** The script does not set `REMOVE_DUPLICATES=true`. Duplicate reads remain in the output BAM and are flagged for downstream tools to recognize or exclude.
+
 
 ## Requirements
 
