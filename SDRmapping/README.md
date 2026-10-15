@@ -127,38 +127,4 @@ The optical duplicate pixel distance is set to `2500`. Review this setting for t
 The supplied scripts define arrays of **132 tasks** (`#SBATCH -a 1-132:1`) and request one node with 16 tasks per node. Step 1 uses partition `nocona`; steps 2–5 use `quanah`. Change these settings for your cluster and sample count.
 
 The following example overrides the array size using `names.txt` and submits the stages with dependencies. It assumes the software environment, partitions, directories, and inputs have already been prepared:
-
-```bash
-n_samples=$(awk 'END {print NR}' names.txt)
-
-j1=$(sbatch --parsable --array="1-${n_samples}" 01-ubam_all.sh)
-j2=$(sbatch --parsable --array="1-${n_samples}" --dependency="afterok:${j1}" 02-alignedbam.sh)
-j3=$(sbatch --parsable --array="1-${n_samples}" --dependency="afterok:${j2}" 03-merge_abam_ubam.sh)
-j4=$(sbatch --parsable --array="1-${n_samples}" --dependency="afterok:${j3}" 04-sortedbam.sh)
-j5=$(sbatch --parsable --array="1-${n_samples}" --dependency="afterok:${j4}" 05-removeduplicatedreads_bam.sh)
-
-printf 'Submitted final job array: %s\n' "$j5"
-```
-
-Each stage waits until the entire preceding array finishes successfully. Standard output and error logs use `%x.%j.out` and `%x.%j.err`, where `%x` is the job name and `%j` is the job ID.
-
-### Settings to review before submission
-
-- **Resources:** The scripts do not specify memory or wall-time limits. Request appropriate limits for your dataset and cluster. Java `-Xms` specifies initial heap allocation, not a maximum; step 1 specifies a maximum heap of 8 GB through `-Xmx8G`.
-- **CPU allocation:** BWA uses 16 threads. Many clusters prefer `--ntasks=1 --cpus-per-task=16` for a multithreaded command; adapt the SLURM directives to local policy.
-- **Failure handling:** The supplied scripts do not enable `set -euo pipefail`. Consider adding it after the `#SBATCH` directives, particularly for the pipelines in steps 2 and 4, so upstream command failures are reported to SLURM.
-- **Metadata:** Check the sample, library, platform-unit, run-date, and recorded aligner-version values before reusing the scripts.
-
-## Check the outputs
-
-After the final stage, check the BAM structure and summarize alignment flags for a sample:
-
-```bash
-samtools quickcheck -v dBAM/sample01.dedup.bam
-samtools flagstat dBAM/sample01.dedup.bam > dBAM/sample01.flagstat.txt
-samtools idxstats dBAM/sample01.dedup.bam > dBAM/sample01.idxstats.txt
-```
-
-Replace `sample01` with a prefix from `names.txt`. Review the SLURM error logs and duplication metrics as well. `quickcheck` checks basic file integrity; it does not establish mapping accuracy or biological suitability.
-
-The final BAMs are starting points for downstream analyses. This directory does not implement mapping-quality filtering, explicit duplicate removal, variant calling, or SDR-specific analysis. Apply the filters required by the downstream method and record software versions and reference provenance when reproducing the analysis.
+ed by the downstream method and record software versions and reference provenance when reproducing the analysis.
